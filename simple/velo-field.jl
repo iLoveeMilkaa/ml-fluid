@@ -3,8 +3,9 @@ using Plots
 using Dates
 
 # Domain
-const Nx, Ny = 40, 40
+const Nx, Ny = 120, 60
 const T = Float32
+const Ux = T(0.5)
 
 # typsichere IC-Funktion
 function make_u0(Ny::Int, ::Type{T}=Float32) where {T<:AbstractFloat}
@@ -14,14 +15,21 @@ function make_u0(Ny::Int, ::Type{T}=Float32) where {T<:AbstractFloat}
 end
 
 u0 = make_u0(Ny, T)
+u0 = let Ny = Ny, Ux = Ux
+    y0 = T(Ny) / T(2)
+    w = T(Ny) / T(8)
+    (i, x) -> i == 1 ? exp(-((x[2] - y0) / w)^2) : (i == 2 ? Ux : zero(T))
+end
 
-sim = Simulation((Nx, Ny), (T(0), T(0)), Ny; U=T(1),
-    ν=T(0.01),
+sim = Simulation((Nx, Ny), (Ux, T(0)), Ny;
+    U=max(T(1), abs(Ux)),   # Zeitskalierung
+    ν=T(0.1),
     uλ=u0,
     perdir=(1, 2),
     body=WaterLily.NoBody(),
     T=T
 )
+
 
 case_id = "velo-field"
 WaterLily.logger(case_id)  # schreibt Solver-Residuals nach "velo-field.log"
@@ -37,17 +45,22 @@ mag(I, u) = sqrt(sum(ntuple(i -> 0.25 * (u[I, i] + u[I+δ(i, I), i])^2, length(I
 duration = 20.0
 step = 0.1
 
+vort(I, u) = 0.5f0 * (
+    (u[I+δ(1, I), 2] - u[I-δ(1, I), 2]) -
+    (u[I+δ(2, I), 1] - u[I-δ(2, I), 1])
+)
+
 anim = Plots.@animate for t in step:step:duration
     WaterLily.sim_step!(sim, t; remeasure=false)
 
-    @inside sim.flow.σ[I] = mag(I, sim.flow.u)
+    @inside sim.flow.σ[I] = vort(I, sim.flow.u)
     field = Array(sim.flow.σ[inside(sim.flow.σ)])
 
     Plots.heatmap(field';
         aspect_ratio=:equal,
-        color=:viridis,
-        clims=(0, 1),
-        title="|u|, t=$(round(t, digits=2))",
+        color=:balance,
+        clims=(-2, 2),
+        title="ω_z t=$(round(t, digits=2))",
         xlabel="x",
         ylabel="y"
     )
